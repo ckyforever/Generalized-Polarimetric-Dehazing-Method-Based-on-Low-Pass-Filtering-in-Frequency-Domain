@@ -5,6 +5,8 @@ import numpy as np
 import polanalyser as pa
 from scipy import fftpack
 
+from polarization_image import PolarizationImage
+
 
 def fourier_lowpass_filter_5x5(image):
     """
@@ -86,47 +88,44 @@ def gaussian_lowpass_filter_5x5(image):
     return img_filtered
 
 
+def process_polarization_image(img_row):
+    """
+    处理偏振图像的主要函数
+    
+    Args:
+        img_row: 原始图像数据
+        
+    Returns:
+        tuple: 恢复的图像和相关信息
+    """
+    # 创建偏振图像处理对象
+    polar_img = PolarizationImage(img_row)
+
+    theta_airlight = np.average(polar_img.aop) / 2
+
+    filtered_polar_img = polar_img.handle_demosaiced_list(fourier_lowpass_filter_5x5)
+
+    img_filtered_dolp_max = np.max(filtered_polar_img.dop)
+
+    airlight = (polar_img.get_img_demosaiced(2) - polar_img.get_stokes_image(0) * (1 - polar_img.dop) / 2) / img_filtered_dolp_max * np.sin(theta_airlight) ** 2
+    airlight_infty = 1.02 * np.max(airlight)
+
+    img_recover = (img_row - airlight) / (1 - airlight / airlight_infty)
+    
+    return img_recover, polar_img, filtered_polar_img
+
+
 if __name__ == "__main__":
     directory = os.path.dirname(__file__)
     image_path = os.path.join(directory, "image/dragon.png")
 
-    img_row = cv2.imread(image_path,-1)
+    img_row = cv2.imread(image_path, -1)
     if img_row is None:
         print("Image not found")
-
-    # 获取四个角度的偏振图像
-    img_demosaiced_list = pa.demosaicing(img_row,pa.COLOR_PolarMono)
-    img_000, img_045, img_090, img_135 = img_demosaiced_list
-
-    # 计算stokes参数
-    img_stokes = pa.calcStokes(img_demosaiced_list,np.deg2rad([0,45,90,135]))
-    img_s0 = img_stokes[..., 0]
-    img_s1 = img_stokes[..., 1]
-    img_s2 = img_stokes[..., 2]
-    img_intensity = pa.cvtStokesToIntensity(img_stokes)  # same as s0
-    img_dolp = pa.cvtStokesToDoLP(img_stokes)  # [0, 1]
-    img_aolp = pa.cvtStokesToAoLP(img_stokes)  # [0, pi]
-
-    theta_airlight = np.arctan(np.sum(img_s2) / np.sum(img_s1)) / 2
-
-    #对偏振图像进行滤波
-    img_000_filtered = fourier_lowpass_filter_5x5(img_000)
-    img_045_filtered = fourier_lowpass_filter_5x5(img_045)
-    img_090_filtered = fourier_lowpass_filter_5x5(img_090)
-    img_135_filtered = fourier_lowpass_filter_5x5(img_135)
-    img_filtered_stokes = pa.calcStokes([img_000_filtered, img_045_filtered, img_090_filtered, img_135_filtered], np.deg2rad([0, 45, 90, 135]))
-    img_filtered_dolp = pa.cvtStokesToDoLP(img_filtered_stokes)  # [0, 1]
-    img_filtered_aolp = pa.cvtStokesToAoLP(img_filtered_stokes)  # [0, pi]
-
-    img_filtered_dolp_max = np.max(img_filtered_dolp)
-
-    airlight = (img_090 - img_s0 *(1 - img_dolp) / 2 ) /img_filtered_dolp_max * np.sin(theta_airlight) ** 2
-    airlight_infty = 1.02 * airlight
-
-    img_recover = (img_row - airlight) / (1 - airlight / airlight_infty)
-
-
-
-
-
-
+    else:
+        # 处理偏振图像
+        img_recover, original_polar, filtered_polar = process_polarization_image(img_row)
+        cv2.imshow("Original Image", img_row)
+        cv2.imshow("Recovered Image", img_recover)
+        cv2.waitKey(0)
+        print("图像处理完成")
